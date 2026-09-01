@@ -1,0 +1,4 @@
+mcp[cli]
+google-ads
+pandas
+python-dotenv
