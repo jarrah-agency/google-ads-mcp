@@ -217,3 +217,119 @@ def fetch_campaign_metrics(
     df = pd.DataFrame(rows)
     df["date"] = pd.to_datetime(df["date"]).dt.date
     return df
+
+
+def fetch_quality_scores(
+    refresh_token: str,
+    customer_id: str,
+    login_customer_id: str | None = None,
+) -> pd.DataFrame:
+    """Fetch keyword quality scores with component breakdowns."""
+    client = build_client(refresh_token, login_customer_id=login_customer_id)
+    ga_service = client.get_service("GoogleAdsService")
+
+    query = """
+        SELECT
+            campaign.id,
+            campaign.name,
+            ad_group.id,
+            ad_group.name,
+            ad_group_criterion.keyword.text,
+            ad_group_criterion.keyword.match_type,
+            ad_group_criterion.quality_info.quality_score,
+            ad_group_criterion.quality_info.creative_quality_score,
+            ad_group_criterion.quality_info.post_click_quality_score,
+            ad_group_criterion.quality_info.search_predicted_ctr
+        FROM keyword_view
+        WHERE ad_group_criterion.status != 'REMOVED'
+            AND campaign.status != 'REMOVED'
+            AND ad_group.status != 'REMOVED'
+            AND ad_group_criterion.quality_info.quality_score > 0
+    """
+
+    rows = []
+    response = ga_service.search_stream(customer_id=customer_id, query=query)
+    for batch in response:
+        for row in batch.results:
+            qi = row.ad_group_criterion.quality_info
+            rows.append({
+                "campaign_id": str(row.campaign.id),
+                "campaign_name": row.campaign.name,
+                "ad_group_id": str(row.ad_group.id),
+                "ad_group_name": row.ad_group.name,
+                "keyword": row.ad_group_criterion.keyword.text,
+                "match_type": row.ad_group_criterion.keyword.match_type.name,
+                "quality_score": qi.quality_score,
+                "ad_relevance": qi.creative_quality_score.name,
+                "landing_page_experience": qi.post_click_quality_score.name,
+                "expected_ctr": qi.search_predicted_ctr.name,
+            })
+
+    if not rows:
+        return pd.DataFrame(columns=[
+            "campaign_id", "campaign_name", "ad_group_id", "ad_group_name",
+            "keyword", "match_type", "quality_score", "ad_relevance",
+            "landing_page_experience", "expected_ctr",
+        ])
+
+    return pd.DataFrame(rows)
+
+
+def fetch_ad_creative(
+    refresh_token: str,
+    customer_id: str,
+    login_customer_id: str | None = None,
+) -> pd.DataFrame:
+    """Fetch ad creative for all non-removed ads (RSA headlines/descriptions + final URLs)."""
+    client = build_client(refresh_token, login_customer_id=login_customer_id)
+    ga_service = client.get_service("GoogleAdsService")
+
+    query = """
+        SELECT
+            campaign.id,
+            campaign.name,
+            ad_group.id,
+            ad_group.name,
+            ad_group_ad.ad.id,
+            ad_group_ad.ad.type,
+            ad_group_ad.ad.final_urls,
+            ad_group_ad.ad.responsive_search_ad.headlines,
+            ad_group_ad.ad.responsive_search_ad.descriptions,
+            ad_group_ad.status
+        FROM ad_group_ad
+        WHERE ad_group_ad.status != 'REMOVED'
+            AND campaign.status != 'REMOVED'
+            AND ad_group.status != 'REMOVED'
+    """
+
+    rows = []
+    response = ga_service.search_stream(customer_id=customer_id, query=query)
+    for batch in response:
+        for row in batch.results:
+            ad = row.ad_group_ad.ad
+            ad_type = ad.type_.name
+            headlines = []
+            descriptions = []
+            if ad_type == "RESPONSIVE_SEARCH_AD":
+                headlines = [h.text for h in ad.responsive_search_ad.headlines]
+                descriptions = [d.text for d in ad.responsive_search_ad.descriptions]
+            rows.append({
+                "campaign_id": str(row.campaign.id),
+                "campaign_name": row.campaign.name,
+                "ad_group_id": str(row.ad_group.id),
+                "ad_group_name": row.ad_group.name,
+                "ad_id": str(ad.id),
+                "ad_type": ad_type,
+                "status": row.ad_group_ad.status.name,
+                "final_urls": list(ad.final_urls),
+                "headlines": headlines,
+                "descriptions": descriptions,
+            })
+
+    if not rows:
+        return pd.DataFrame(columns=[
+            "campaign_id", "campaign_name", "ad_group_id", "ad_group_name",
+            "ad_id", "ad_type", "status", "final_urls", "headlines", "descriptions",
+        ])
+
+    return pd.DataFrame(rows)

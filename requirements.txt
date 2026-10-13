@@ -1,4 +1,4 @@
-mcp[cli]
+mcp[cli]<2
 google-ads
 pandas
 python-dotenv
