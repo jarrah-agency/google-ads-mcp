@@ -1,4 +1,4 @@
-# googleads-mcp
+# jarrah-gads-mcp
 
 A minimal MCP server that exposes Google Ads query capabilities as tools for use with Claude and other MCP clients.
 
@@ -19,7 +19,7 @@ A minimal MCP server that exposes Google Ads query capabilities as tools for use
 ### 1. Install
 
 ```bash
-pip install googleads-mcp
+pip install jarrah-gads-mcp
 ```
 
 ### 2. Configure credentials
@@ -53,7 +53,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
   "mcpServers": {
     "google-ads": {
       "command": "uvx",
-      "args": ["googleads-mcp"]
+      "args": ["jarrah-gads-mcp"]
     }
   }
 }
