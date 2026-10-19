@@ -39,7 +39,7 @@ async def run_gaql(query: str) -> str:
     geographic_view, user_location_view, gender_view, age_range_view,
     audience_view, ad_group_ad, conversion_action.
     """
-    from googleads_mcp.google_ads_tools import run_gaql as _run_gaql
+    from jarrah_gads_mcp.google_ads_tools import run_gaql as _run_gaql
     return await _run_gaql(query, CUSTOMER_ID, REFRESH_TOKEN, LOGIN_CUSTOMER_ID)
 
 
@@ -50,7 +50,7 @@ def list_accounts() -> list[dict]:
     Returns a list of {id, name, is_manager} dicts.
     Manager accounts (MCC) can be passed to list_client_accounts.
     """
-    from googleads_mcp.google_ads import list_accessible_customers
+    from jarrah_gads_mcp.google_ads import list_accessible_customers
     return list_accessible_customers(REFRESH_TOKEN)
 
 
@@ -63,7 +63,7 @@ def list_client_accounts(manager_id: str) -> list[dict]:
 
     Returns a list of {id, name, status} dicts.
     """
-    from googleads_mcp.google_ads import list_client_accounts as _list_clients
+    from jarrah_gads_mcp.google_ads import list_client_accounts as _list_clients
     return _list_clients(REFRESH_TOKEN, manager_id)
 
 
@@ -78,7 +78,7 @@ def get_campaign_metrics(start_date: str, end_date: str) -> list[dict]:
     Returns cost, impressions, clicks, and search impression share per campaign/date/device.
     """
     from datetime import date
-    from googleads_mcp.google_ads import fetch_campaign_metrics
+    from jarrah_gads_mcp.google_ads import fetch_campaign_metrics
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
     df = fetch_campaign_metrics(REFRESH_TOKEN, CUSTOMER_ID, LOGIN_CUSTOMER_ID, start, end)
@@ -96,7 +96,7 @@ def get_conversion_actions() -> list[dict]:
     Returns name, type, category, and volume_90d for each conversion action,
     sorted by volume descending.
     """
-    from googleads_mcp.google_ads import list_conversion_actions
+    from jarrah_gads_mcp.google_ads import list_conversion_actions
     return list_conversion_actions(REFRESH_TOKEN, CUSTOMER_ID, LOGIN_CUSTOMER_ID)
 
 
@@ -108,7 +108,7 @@ def get_quality_scores() -> list[dict]:
     expected_ctr for all active keywords. Component scores are ABOVE_AVERAGE,
     AVERAGE, or BELOW_AVERAGE.
     """
-    from googleads_mcp.google_ads import fetch_quality_scores
+    from jarrah_gads_mcp.google_ads import fetch_quality_scores
     df = fetch_quality_scores(REFRESH_TOKEN, CUSTOMER_ID, LOGIN_CUSTOMER_ID)
     return df.to_dict(orient="records")
 
@@ -120,7 +120,7 @@ def get_ad_creative() -> list[dict]:
     Returns headlines, descriptions, and final URLs for responsive search ads.
     Other ad types return type and status only.
     """
-    from googleads_mcp.google_ads import fetch_ad_creative
+    from jarrah_gads_mcp.google_ads import fetch_ad_creative
     df = fetch_ad_creative(REFRESH_TOKEN, CUSTOMER_ID, LOGIN_CUSTOMER_ID)
     return df.to_dict(orient="records")
 

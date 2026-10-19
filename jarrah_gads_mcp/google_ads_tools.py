@@ -19,7 +19,7 @@ async def run_gaql(
 
     def _sync() -> list[dict] | str:
         from google.ads.googleads.errors import GoogleAdsException
-        from googleads_mcp.google_ads import build_client
+        from jarrah_gads_mcp.google_ads import build_client
 
         client = build_client(refresh_token, login_customer_id)
         ga_service = client.get_service("GoogleAdsService")

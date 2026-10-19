@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "googleads-mcp"
+name = "jarrah-gads-mcp"
 version = "0.1.0"
 description = "MCP server for querying Google Ads via GAQL"
 readme = "README.md"
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-googleads-mcp = "googleads_mcp.server:main"
+jarrah-gads-mcp = "jarrah_gads_mcp.server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["googleads_mcp"]
+packages = ["jarrah_gads_mcp"]
