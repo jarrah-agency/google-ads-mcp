@@ -4,16 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A minimal MCP server that exposes Google Ads query capabilities as tools. It was extracted from the Parabola AI app (`jarrah-agency/parabola-ai`) — `google_ads.py` and `google_ads_tools.py` are derived from that codebase.
+A remote HTTP MCP server exposing Google Ads tools. Users authenticate with their own Google accounts
+via OAuth 2.0, select a Google Ads account, and the server issues MCP bearer tokens that carry their
+credentials. Published to PyPI as `jarrah-gads-mcp`.
 
-Published to PyPI as `jarrah-gads-mcp`.
+Derived from the Parabola AI app (`jarrah-agency/parabola-ai`) — `google_ads.py` and `google_ads_tools.py`
+are taken from that codebase.
 
-## Setup & running
+## Running locally for development
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env   # fill in credentials
-python server.py       # runs on stdio transport
+cp .env.example .env   # fill in SERVER_URL, GOOGLE_ADS_* credentials, FERNET_KEY
+SERVER_URL=http://localhost:8000 python3 -m jarrah_gads_mcp.server
 ```
 
 ## Environment variables
@@ -21,77 +24,113 @@ python server.py       # runs on stdio transport
 | Variable | Required | Notes |
 |---|---|---|
 | `GOOGLE_ADS_DEVELOPER_TOKEN` | Yes | From Google Ads API Centre |
-| `GOOGLE_ADS_CLIENT_ID` | Yes | Google Cloud Console OAuth app |
-| `GOOGLE_ADS_CLIENT_SECRET` | Yes | Google Cloud Console OAuth app |
-| `GOOGLE_ADS_REFRESH_TOKEN` | Yes | OAuth refresh token for the account to query |
-| `GOOGLE_ADS_CUSTOMER_ID` | Yes | Account to query (digits only or with dashes) |
-| `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | No | MCC manager ID — only needed when querying through a manager account |
+| `GOOGLE_ADS_CLIENT_ID` | Yes | **Web application** OAuth client in Google Cloud Console |
+| `GOOGLE_ADS_CLIENT_SECRET` | Yes | Same Web application OAuth client |
+| `SERVER_URL` | Yes | Deployed base URL, e.g. `https://my.up.railway.app` — no trailing slash |
+| `FERNET_KEY` | Recommended | Base64 Fernet key for encrypting Google refresh tokens in SQLite. Auto-generates one if absent (tokens lost on restart). Generate: `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `PORT` | No | HTTP port (default 8000) |
+| `DB_PATH` | No | Path to SQLite DB (default: `gads_mcp.db` beside project root) |
+
+`GOOGLE_ADS_REFRESH_TOKEN`, `GOOGLE_ADS_CUSTOMER_ID`, and `GOOGLE_ADS_LOGIN_CUSTOMER_ID` are **no longer
+needed** — credentials are obtained per-user via the OAuth flow.
 
 ## Architecture
 
-Source files exist in two locations:
-- **Root** (`server.py`, `google_ads.py`, `google_ads_tools.py`) — used for local development via stdio
-- **`jarrah_gads_mcp/`** — Python package for PyPI distribution; mirrors the root files with updated imports
+```
+jarrah_gads_mcp/
+  db.py            — SQLite CRUD (sync functions, called via asyncio.to_thread)
+  auth_provider.py — GoogleAdsOAuthProvider implementing OAuthAuthorizationServerProvider
+  server.py        — FastMCP server with auth, tools, and custom routes
+  google_ads.py    — GoogleAdsClient wrapper + fetch_* functions returning DataFrames
+  google_ads_tools.py — run_gaql() async wrapper with JSON output
+```
 
-The two sets of files must be kept in sync when making changes.
+Root-level `server.py` is the original stdio version kept for reference; `jarrah_gads_mcp/server.py`
+is the authoritative remote version used by the PyPI entry point.
 
-### Files
+### OAuth flow
 
-- **`server.py`** / **`jarrah_gads_mcp/server.py`** — FastMCP server. Reads credentials from env on startup. Exposes seven tools (see below). Imports from the other two files lazily (inside tool functions) to keep startup fast.
-- **`google_ads.py`** / **`jarrah_gads_mcp/google_ads.py`** — `build_client()` constructs a `GoogleAdsClient` from env vars + a refresh token. Contains `list_accessible_customers()`, `list_client_accounts()`, and `fetch_*` functions that return pandas DataFrames.
-- **`google_ads_tools.py`** / **`jarrah_gads_mcp/google_ads_tools.py`** — `run_gaql()` executes arbitrary GAQL via `ga_service.search()`, compacts proto-plus rows to plain dicts, caps at 100 rows, returns JSON string. `GoogleAdsException` errors are returned as strings rather than raised.
+```
+MCP client → GET /authorize
+  → authorize() stores pending state → redirects to Google OAuth
+Google → GET /oauth/google/callback
+  → exchanges Google code for Google refresh token
+  → lists accessible Google Ads accounts
+  → single account: auto-selects; multiple: shows HTML account picker
+  → creates MCP auth code → redirects back to MCP client redirect_uri
+MCP client → POST /token
+  → exchange_authorization_code() mints MCP access+refresh tokens
+  → tokens carry (encrypted Google refresh token, customer_id, login_customer_id)
+MCP tool call → bearer token verified via load_access_token()
+  → GadsAccessToken contains decrypted google_refresh_token
+  → tools call _creds() → get_access_token() to retrieve credentials
+```
+
+### Key types
+
+- `GadsAccessToken(AccessToken)` — extends with `google_refresh_token`, `customer_id`, `login_customer_id`
+- `GadsAuthCode(AuthorizationCode)` — extends with `google_rt_enc`, `customer_id`, `login_customer_id`
+- `GadsRefreshToken(RefreshToken)` — extends with `google_rt_enc`, `customer_id`, `login_customer_id`
+
+Note from provider.py: "FastMCP doesn't render any of these types in the user response, so it's OK to
+add fields to subclasses which should not be exposed externally."
+
+### Access token context in tools
+
+Tools retrieve per-user credentials via:
+```python
+from mcp.server.auth.middleware.auth_context import get_access_token
+token = get_access_token()  # returns GadsAccessToken for authenticated requests
+```
+
+This works because `AuthContextMiddleware` stores the authenticated user in a contextvar.
+
+### Custom routes
+
+`@mcp.custom_route()` adds routes that bypass MCP auth middleware:
+- `GET /oauth/google/callback` — receives Google OAuth callback
+- `POST /oauth/select-account` — handles account picker form
+- `GET /health` — health check
 
 ### Tools
 
 | Tool | Function |
 |---|---|
-| `run_gaql` | Execute arbitrary GAQL against the configured account |
-| `list_accounts` | List all accounts accessible with the refresh token |
+| `run_gaql` | Execute arbitrary GAQL against the authenticated account |
+| `list_accounts` | List all accounts accessible with the authenticated user's Google token |
 | `list_client_accounts` | List leaf accounts under an MCC manager |
 | `get_campaign_metrics` | Spend/impressions/clicks/IS by date, device, channel |
 | `get_conversion_actions` | Enabled conversions with 90-day volume |
 | `get_quality_scores` | Keyword QS (1–10) with ad relevance, landing page, expected CTR |
 | `get_ad_creative` | RSA headlines, descriptions, final URLs for all active ads |
 
+## Deploying to Railway
+
+1. Create a Railway project, link to this GitHub repo
+2. Add a persistent volume mounted at `/data`, set `DB_PATH=/data/gads_mcp.db`
+3. Set all required env vars in Railway dashboard
+4. Add `SERVER_URL=https://<your-app>.up.railway.app`
+5. In Google Cloud Console: add `https://<your-app>.up.railway.app/oauth/google/callback`
+   as an authorized redirect URI for your **Web application** OAuth client
+
+The entry command is `jarrah-gads-mcp` (from the PyPI entry point) or:
+```
+uvicorn jarrah_gads_mcp.server:mcp.streamable_http_app() --host 0.0.0.0 --port $PORT
+```
+Actually just run `python3 -m jarrah_gads_mcp.server` or `jarrah-gads-mcp`.
+
 ## PyPI package
 
-Published as `jarrah-gads-mcp`. To release a new version:
+To release a new version:
 1. Bump `version` in `pyproject.toml`
-2. `python -m build`
+2. `python3 -m build`
 3. `twine upload dist/* -u __token__ -p <pypi_token>`
-
-## Registering with Claude Desktop (local)
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "google-ads": {
-      "command": "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3",
-      "args": ["/path/to/google-ads-mcp/server.py"],
-      "env": {
-        "GOOGLE_ADS_DEVELOPER_TOKEN": "...",
-        "GOOGLE_ADS_CLIENT_ID": "...",
-        "GOOGLE_ADS_CLIENT_SECRET": "...",
-        "GOOGLE_ADS_REFRESH_TOKEN": "...",
-        "GOOGLE_ADS_CUSTOMER_ID": "..."
-      }
-    }
-  }
-}
-```
-
-Use the full Python path — Claude Desktop does not inherit shell PATH reliably. `uvx` requires `uv` to be installed separately (`brew install uv`).
-
-## TODO
-
-- **Remote HTTP transport** — current stdio transport only works locally. To support team members and list on MCP directories properly, the server needs to be rewritten to use HTTP/SSE transport and deployed (Railway, Render, Fly.io). Each user would supply their own credentials via the config `env` block (Option A), or a full OAuth flow could be built (Option B).
 
 ## GAQL notes
 
 - `run_gaql` uses `ga_service.search()` (not `search_stream`) — suitable for ad-hoc queries up to 100 rows.
 - Always include a date filter; Google Ads API rejects most queries without one.
 - Customer ID dashes are stripped inside `run_gaql` before the API call.
-- The `_compact()` helper in `google_ads_tools.py` recursively drops keys with empty dict, empty list, `None`, `0`, `""`, or `False` values to keep LLM context concise.
+- The `_compact()` helper in `google_ads_tools.py` recursively drops keys with empty dict, empty list,
+  `None`, `0`, `""`, or `False` values to keep LLM context concise.
 - `mcp` is pinned to `<2` — the 2.x release renamed `FastMCP` and broke the server.

@@ -13,6 +13,9 @@ dependencies = [
     "google-ads",
     "pandas",
     "python-dotenv",
+    "httpx",
+    "cryptography",
+    "uvicorn[standard]",
 ]
 
 [project.scripts]

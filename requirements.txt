@@ -2,3 +2,6 @@ mcp[cli]<2
 google-ads
 pandas
 python-dotenv
+httpx
+cryptography
+uvicorn[standard]
