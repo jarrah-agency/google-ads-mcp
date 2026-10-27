@@ -16,6 +16,8 @@ dependencies = [
     "httpx",
     "cryptography",
     "uvicorn[standard]",
+    "requests[security]",
+    "pyOpenSSL",
 ]
 
 [project.scripts]
