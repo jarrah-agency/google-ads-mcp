@@ -208,6 +208,82 @@ async def get_quality_scores() -> list[dict]:
 
 
 @mcp.tool()
+async def generate_keyword_ideas(
+    keywords: list[str],
+    url: str | None = None,
+    language_id: int = 1000,
+    country_code: str = "US",
+    page_size: int = 100,
+) -> list[dict]:
+    """Generate keyword ideas using Google Keyword Planner.
+
+    Provide seed keywords, a URL, or both. Returns up to page_size results
+    sorted by average monthly searches descending.
+
+    Args:
+        keywords: Seed keywords to generate ideas from (e.g. ["running shoes"]).
+        url: Optional seed URL — Keyword Planner will extract themes from the page.
+        language_id: Google language criterion ID (default 1000 = English).
+                     Common IDs: 1000=English, 1001=French, 1003=Spanish,
+                     1031=German, 1005=Italian, 1018=Portuguese.
+        country_code: ISO 3166-1 alpha-2 country code for geo targeting (default "US").
+        page_size: Max results to return (default 100, max ~1000).
+
+    Returns a list of dicts with:
+        keyword, avg_monthly_searches, competition (LOW/MEDIUM/HIGH),
+        low_top_of_page_bid (USD), high_top_of_page_bid (USD).
+
+    Note: Requires billing configured on the Google Ads account. Accounts without
+    active spend may receive search volume ranges rather than exact numbers.
+    """
+    refresh_token, customer_id, login_customer_id = _creds()
+
+    def _sync():
+        from jarrah_gads_mcp.google_ads import generate_keyword_ideas as _gen
+        return _gen(
+            refresh_token, customer_id, login_customer_id,
+            keywords=keywords, url=url,
+            language_id=language_id, country_code=country_code,
+            page_size=page_size,
+        )
+
+    return await asyncio.to_thread(_sync)
+
+
+@mcp.tool()
+async def get_keyword_historical_metrics(
+    keywords: list[str],
+    language_id: int = 1000,
+    country_code: str = "US",
+) -> list[dict]:
+    """Get historical search metrics for a specific list of keywords.
+
+    Use this when you already know which keywords you want data for (e.g. checking
+    metrics on your existing keyword list). Use generate_keyword_ideas to discover
+    new keyword suggestions.
+
+    Args:
+        keywords: List of keywords to look up (e.g. ["running shoes", "trail shoes"]).
+        language_id: Google language criterion ID (default 1000 = English).
+        country_code: ISO 3166-1 alpha-2 country code (default "US").
+
+    Returns a list of dicts with:
+        keyword, avg_monthly_searches, competition (LOW/MEDIUM/HIGH),
+        low_top_of_page_bid (USD), high_top_of_page_bid (USD).
+    """
+    refresh_token, customer_id, login_customer_id = _creds()
+
+    def _sync():
+        from jarrah_gads_mcp.google_ads import get_keyword_historical_metrics as _get
+        return _get(
+            refresh_token, customer_id, login_customer_id,
+            keywords=keywords, language_id=language_id, country_code=country_code,
+        )
+
+    return await asyncio.to_thread(_sync)
+
+
+@mcp.tool()
 async def get_ad_creative() -> list[dict]:
     """Get ad creative for all active ads.
 

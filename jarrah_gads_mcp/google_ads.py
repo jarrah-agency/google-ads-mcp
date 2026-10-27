@@ -275,6 +275,144 @@ def fetch_quality_scores(
     return pd.DataFrame(rows)
 
 
+def generate_keyword_ideas(
+    refresh_token: str,
+    customer_id: str,
+    login_customer_id: str | None,
+    keywords: list[str],
+    url: str | None = None,
+    language_id: int = 1000,  # English
+    country_code: str = "US",
+    page_size: int = 100,
+) -> list[dict]:
+    """Generate keyword ideas using KeywordPlanIdeaService.
+
+    Returns a list of dicts with keyword, avg_monthly_searches, competition,
+    low_bid_micros, high_bid_micros.
+
+    language_id: Google language criterion ID (1000=English, 1001=French, etc.)
+    country_code: ISO 3166-1 alpha-2 country code used to look up geo target.
+    """
+    client = build_client(refresh_token, login_customer_id=login_customer_id)
+    kp_idea_service = client.get_service("KeywordPlanIdeaService")
+    geo_target_service = client.get_service("GeoTargetConstantService")
+
+    # Resolve country code → geo target resource name
+    suggest_req = client.get_type("SuggestGeoTargetConstantsRequest")
+    suggest_req.locale = "en"
+    suggest_req.country_code = country_code
+    geo_resp = geo_target_service.suggest_geo_target_constants(request=suggest_req)
+    geo_target = None
+    for suggestion in geo_resp.geo_target_constant_suggestions:
+        g = suggestion.geo_target_constant
+        if g.target_type == "Country":
+            geo_target = g.resource_name
+            break
+    if geo_target is None and geo_resp.geo_target_constant_suggestions:
+        geo_target = geo_resp.geo_target_constant_suggestions[0].geo_target_constant.resource_name
+
+    language_resource = f"languageConstants/{language_id}"
+
+    request = client.get_type("GenerateKeywordIdeasRequest")
+    request.customer_id = customer_id.replace("-", "")
+    request.language = language_resource
+    if geo_target:
+        request.geo_target_constants.append(geo_target)
+    request.include_adult_keywords = False
+    request.page_size = page_size
+
+    if keywords and url:
+        seed = client.get_type("KeywordAndUrlSeed")
+        seed.url = url
+        seed.keywords.extend(keywords)
+        request.keyword_and_url_seed.CopyFrom(seed)
+    elif url:
+        seed = client.get_type("UrlSeed")
+        seed.url = url
+        request.url_seed.CopyFrom(seed)
+    else:
+        seed = client.get_type("KeywordSeed")
+        seed.keywords.extend(keywords)
+        request.keyword_seed.CopyFrom(seed)
+
+    COMPETITION_MAP = {0: "UNSPECIFIED", 1: "UNKNOWN", 2: "LOW", 3: "MEDIUM", 4: "HIGH"}
+
+    results = []
+    response = kp_idea_service.generate_keyword_ideas(request=request)
+    for idea in response:
+        m = idea.keyword_idea_metrics
+        results.append({
+            "keyword": idea.text,
+            "avg_monthly_searches": m.avg_monthly_searches,
+            "competition": COMPETITION_MAP.get(int(m.competition), "UNKNOWN"),
+            "low_top_of_page_bid": round(m.low_top_of_page_bid_micros / 1_000_000, 2) if m.low_top_of_page_bid_micros else None,
+            "high_top_of_page_bid": round(m.high_top_of_page_bid_micros / 1_000_000, 2) if m.high_top_of_page_bid_micros else None,
+        })
+
+    results.sort(key=lambda r: r["avg_monthly_searches"] or 0, reverse=True)
+    return results
+
+
+def get_keyword_historical_metrics(
+    refresh_token: str,
+    customer_id: str,
+    login_customer_id: str | None,
+    keywords: list[str],
+    language_id: int = 1000,
+    country_code: str = "US",
+) -> list[dict]:
+    """Get historical metrics for a specific list of keywords.
+
+    Returns avg_monthly_searches, competition, and bid estimates for each keyword.
+    """
+    client = build_client(refresh_token, login_customer_id=login_customer_id)
+    kp_idea_service = client.get_service("KeywordPlanIdeaService")
+    geo_target_service = client.get_service("GeoTargetConstantService")
+
+    suggest_req = client.get_type("SuggestGeoTargetConstantsRequest")
+    suggest_req.locale = "en"
+    suggest_req.country_code = country_code
+    geo_resp = geo_target_service.suggest_geo_target_constants(request=suggest_req)
+    geo_target = None
+    for suggestion in geo_resp.geo_target_constant_suggestions:
+        g = suggestion.geo_target_constant
+        if g.target_type == "Country":
+            geo_target = g.resource_name
+            break
+    if geo_target is None and geo_resp.geo_target_constant_suggestions:
+        geo_target = geo_resp.geo_target_constant_suggestions[0].geo_target_constant.resource_name
+
+    language_resource = f"languageConstants/{language_id}"
+
+    request = client.get_type("GenerateKeywordIdeasRequest")
+    request.customer_id = customer_id.replace("-", "")
+    request.language = language_resource
+    if geo_target:
+        request.geo_target_constants.append(geo_target)
+    request.include_adult_keywords = False
+    request.page_size = len(keywords)
+
+    seed = client.get_type("KeywordSeed")
+    seed.keywords.extend(keywords)
+    request.keyword_seed.CopyFrom(seed)
+
+    COMPETITION_MAP = {0: "UNSPECIFIED", 1: "UNKNOWN", 2: "LOW", 3: "MEDIUM", 4: "HIGH"}
+
+    results = []
+    response = kp_idea_service.generate_keyword_ideas(request=request)
+    for idea in response:
+        m = idea.keyword_idea_metrics
+        results.append({
+            "keyword": idea.text,
+            "avg_monthly_searches": m.avg_monthly_searches,
+            "competition": COMPETITION_MAP.get(int(m.competition), "UNKNOWN"),
+            "low_top_of_page_bid": round(m.low_top_of_page_bid_micros / 1_000_000, 2) if m.low_top_of_page_bid_micros else None,
+            "high_top_of_page_bid": round(m.high_top_of_page_bid_micros / 1_000_000, 2) if m.high_top_of_page_bid_micros else None,
+        })
+
+    return results
+
+
 def fetch_ad_creative(
     refresh_token: str,
     customer_id: str,

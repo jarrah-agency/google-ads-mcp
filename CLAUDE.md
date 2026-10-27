@@ -103,6 +103,8 @@ This works because `AuthContextMiddleware` stores the authenticated user in a co
 | `get_conversion_actions` | Enabled conversions with 90-day volume |
 | `get_quality_scores` | Keyword QS (1–10) with ad relevance, landing page, expected CTR |
 | `get_ad_creative` | RSA headlines, descriptions, final URLs for all active ads |
+| `generate_keyword_ideas` | Keyword Planner: discover new keywords from seeds/URL with volume, competition, bid estimates |
+| `get_keyword_historical_metrics` | Keyword Planner: fetch metrics for a known list of keywords |
 
 ## Deploying to Railway
 
