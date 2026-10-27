@@ -7,6 +7,7 @@ primary_region = "syd"
 
 [env]
   PORT = "8000"
+  PYTHONUNBUFFERED = "1"
 
 [mounts]
   source = "gads_mcp_data"
