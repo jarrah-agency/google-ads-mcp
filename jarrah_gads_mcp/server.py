@@ -534,7 +534,8 @@ async def health(_request: Request) -> Response:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    mcp.run(transport="streamable-http")
+    import uvicorn
+    uvicorn.run(mcp.streamable_http_app(), host="0.0.0.0", port=PORT, log_level="info")
 
 
 if __name__ == "__main__":
