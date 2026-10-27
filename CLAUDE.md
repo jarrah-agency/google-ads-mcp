@@ -113,11 +113,7 @@ This works because `AuthContextMiddleware` stores the authenticated user in a co
 5. In Google Cloud Console: add `https://<your-app>.up.railway.app/oauth/google/callback`
    as an authorized redirect URI for your **Web application** OAuth client
 
-The entry command is `jarrah-gads-mcp` (from the PyPI entry point) or:
-```
-uvicorn jarrah_gads_mcp.server:mcp.streamable_http_app() --host 0.0.0.0 --port $PORT
-```
-Actually just run `python3 -m jarrah_gads_mcp.server` or `jarrah-gads-mcp`.
+Start command: `jarrah-gads-mcp` (PyPI entry point) or `python3 -m jarrah_gads_mcp.server`.
 
 ## PyPI package
 
