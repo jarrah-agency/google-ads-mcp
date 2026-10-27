@@ -122,6 +122,14 @@ To release a new version:
 2. `python3 -m build`
 3. `twine upload dist/* -u __token__ -p <pypi_token>`
 
+## TODO
+
+1. **Deploy to Railway** — create Railway project, link repo, add persistent volume at `/data`, set all env vars (see Deploying to Railway section above).
+2. **New Google Cloud OAuth app** — create a **Web application** type OAuth client (not Desktop), add the Railway callback URL as an authorized redirect URI: `https://<your-app>.up.railway.app/oauth/google/callback`.
+3. **Generate FERNET_KEY** — `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` — store in Railway env vars.
+4. **Connect in Claude Desktop** — add the MCP server URL (`https://<your-app>.up.railway.app`) as a remote MCP connector; Claude will trigger the OAuth flow on first use.
+5. **Publish updated PyPI package** — bump version in `pyproject.toml`, build and upload with `twine` so users can install the remote version via `uvx jarrah-gads-mcp`.
+
 ## GAQL notes
 
 - `run_gaql` uses `ga_service.search()` (not `search_stream`) — suitable for ad-hoc queries up to 100 rows.
