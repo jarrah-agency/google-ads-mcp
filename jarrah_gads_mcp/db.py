@@ -12,7 +12,7 @@ DB_PATH = os.environ.get(
     str(Path(__file__).parent.parent / "gads_mcp.db"),
 )
 
-_lock = threading.Lock()
+_lock = threading.RLock()
 _conn: sqlite3.Connection | None = None
 
 
