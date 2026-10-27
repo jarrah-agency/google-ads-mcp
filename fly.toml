@@ -1,5 +1,5 @@
 # fly.toml — replace "your-app-name" with your actual Fly app name
-app = "your-app-name"
+app = "jarrah-gads-mcp"
 primary_region = "syd"
 
 [build]
@@ -22,6 +22,6 @@ primary_region = "syd"
   [[http_service.checks]]
     interval = "30s"
     timeout = "5s"
-    grace_period = "15s"
+    grace_period = "60s"
     method = "GET"
     path = "/health"
