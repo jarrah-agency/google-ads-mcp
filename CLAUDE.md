@@ -26,7 +26,7 @@ SERVER_URL=http://localhost:8000 python3 -m jarrah_gads_mcp.server
 | `GOOGLE_ADS_DEVELOPER_TOKEN` | Yes | From Google Ads API Centre |
 | `GOOGLE_ADS_CLIENT_ID` | Yes | **Web application** OAuth client in Google Cloud Console |
 | `GOOGLE_ADS_CLIENT_SECRET` | Yes | Same Web application OAuth client |
-| `SERVER_URL` | Yes | Deployed base URL, e.g. `https://my.up.railway.app` — no trailing slash |
+| `SERVER_URL` | Yes | Deployed base URL, e.g. `https://jarrah-gads-mcp.fly.dev` — no trailing slash |
 | `FERNET_KEY` | Recommended | Base64 Fernet key for encrypting Google refresh tokens in SQLite. Auto-generates one if absent (tokens lost on restart). Generate: `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `PORT` | No | HTTP port (default 8000) |
 | `DB_PATH` | No | Path to SQLite DB (default: `gads_mcp.db` beside project root) |
@@ -85,6 +85,15 @@ token = get_access_token()  # returns GadsAccessToken for authenticated requests
 
 This works because `AuthContextMiddleware` stores the authenticated user in a contextvar.
 
+### MCP endpoint path
+
+FastMCP mounts the streamable-HTTP MCP endpoint at `/mcp`, not `/`. Claude Desktop and other
+clients that POST to the root URL are handled by `_McpRootRewrite` in `server.py`, an ASGI
+middleware that rewrites `scope["path"]` from `/` to `/mcp` before the request reaches the app.
+
+`resource_server_url` in `AuthSettings` is set to `f"{SERVER_URL}/mcp"` so the
+`/.well-known/oauth-protected-resource` metadata advertises the correct endpoint.
+
 ### Custom routes
 
 `@mcp.custom_route()` adds routes that bypass MCP auth middleware:
@@ -106,16 +115,35 @@ This works because `AuthContextMiddleware` stores the authenticated user in a co
 | `generate_keyword_ideas` | Keyword Planner: discover new keywords from seeds/URL with volume, competition, bid estimates |
 | `get_keyword_historical_metrics` | Keyword Planner: fetch metrics for a known list of keywords |
 
-## Deploying to Railway
+### Keyword Planner notes
 
-1. Create a Railway project, link to this GitHub repo
-2. Add a persistent volume mounted at `/data`, set `DB_PATH=/data/gads_mcp.db`
-3. Set all required env vars in Railway dashboard
-4. Add `SERVER_URL=https://<your-app>.up.railway.app`
-5. In Google Cloud Console: add `https://<your-app>.up.railway.app/oauth/google/callback`
-   as an authorized redirect URI for your **Web application** OAuth client
+- Uses `KeywordPlanIdeaService.GenerateKeywordIdeas` — **not** `search` or `search_stream`.
+- Geo targeting uses a hardcoded `_COUNTRY_GEO_ID` dict in `google_ads.py` (ISO 3166-1 alpha-2 →
+  criteria ID, e.g. `AU=2036`, `US=2840`). Do **not** use `SuggestGeoTargetConstants` — it requires
+  `location_names` or `geo_targets` in the request body and errors if only `country_code` is set.
+- Seed objects (`KeywordSeed`, `UrlSeed`, `KeywordAndUrlSeed`) use proto-plus and do **not** have
+  `CopyFrom()`. Set fields directly on `request.keyword_seed`, `request.url_seed`, etc.
+- `KeywordPlanIdeaService` has tight daily quotas on Test/Basic developer token access levels.
+  Apply for Standard access in the Google Ads API Center for production use.
 
-Start command: `jarrah-gads-mcp` (PyPI entry point) or `python3 -m jarrah_gads_mcp.server`.
+## Deploying to Fly.io
+
+The app is deployed at `https://jarrah-gads-mcp.fly.dev` (region: `syd`, 512 MB RAM, persistent
+volume at `/data`).
+
+```bash
+fly deploy                          # build and deploy
+fly logs --app jarrah-gads-mcp      # stream logs
+fly machine restart <id>            # restart a crashed machine
+fly machine update <id> --vm-memory 512 --yes   # resize RAM
+fly secrets set KEY=value           # set env vars (triggers redeploy)
+```
+
+To set up from scratch:
+1. `fly launch` — creates app and `fly.toml`
+2. `fly volumes create gads_mcp_data --region syd --size 1`
+3. `fly secrets set GOOGLE_ADS_DEVELOPER_TOKEN=... GOOGLE_ADS_CLIENT_ID=... GOOGLE_ADS_CLIENT_SECRET=... SERVER_URL=https://<app>.fly.dev FERNET_KEY=... DB_PATH=/data/gads_mcp.db`
+4. In Google Cloud Console: add `https://<app>.fly.dev/oauth/google/callback` as an authorized redirect URI on the **Web application** OAuth client.
 
 ## PyPI package
 
@@ -123,14 +151,6 @@ To release a new version:
 1. Bump `version` in `pyproject.toml`
 2. `python3 -m build`
 3. `twine upload dist/* -u __token__ -p <pypi_token>`
-
-## TODO
-
-1. **Deploy to Railway** — create Railway project, link repo, add persistent volume at `/data`, set all env vars (see Deploying to Railway section above).
-2. **New Google Cloud OAuth app** — create a **Web application** type OAuth client (not Desktop), add the Railway callback URL as an authorized redirect URI: `https://<your-app>.up.railway.app/oauth/google/callback`.
-3. **Generate FERNET_KEY** — `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` — store in Railway env vars.
-4. **Connect in Claude Desktop** — add the MCP server URL (`https://<your-app>.up.railway.app`) as a remote MCP connector; Claude will trigger the OAuth flow on first use.
-5. **Publish updated PyPI package** — bump version in `pyproject.toml`, build and upload with `twine` so users can install the remote version via `uvx jarrah-gads-mcp`.
 
 ## GAQL notes
 
@@ -140,3 +160,12 @@ To release a new version:
 - The `_compact()` helper in `google_ads_tools.py` recursively drops keys with empty dict, empty list,
   `None`, `0`, `""`, or `False` values to keep LLM context concise.
 - `mcp` is pinned to `<2` — the 2.x release renamed `FastMCP` and broke the server.
+
+## Known issues / gotchas
+
+- `db.py` uses `threading.RLock()` (not `Lock()`) — `init_db()` acquires the lock then calls
+  `_get_conn()` which also acquires it; a non-reentrant lock would deadlock on startup.
+- The Fly.io free tier machine (256 MB) is too small — the Google Ads gRPC library spikes memory
+  during tool calls. Run at 512 MB minimum.
+- Health check timeout is 5s; long-running Google Ads API calls can cause a single check to fail.
+  This is harmless unless the machine is genuinely OOM-crashing.

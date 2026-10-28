@@ -64,7 +64,7 @@ mcp = FastMCP(
     auth_server_provider=provider,
     auth=AuthSettings(
         issuer_url=SERVER_URL,  # type: ignore[arg-type]
-        resource_server_url=SERVER_URL,  # type: ignore[arg-type]
+        resource_server_url=f"{SERVER_URL}/mcp",  # type: ignore[arg-type]
         client_registration_options=ClientRegistrationOptions(
             enabled=True,
             valid_scopes=["google-ads"],
@@ -533,9 +533,23 @@ async def health(_request: Request) -> Response:
 # Entry point
 # ---------------------------------------------------------------------------
 
+class _McpRootRewrite:
+    """Rewrite requests to / → /mcp so clients that POST to the root URL work."""
+    def __init__(self, app):
+        self._app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http" and scope.get("path") == "/":
+            scope = dict(scope)
+            scope["path"] = "/mcp"
+            scope["raw_path"] = b"/mcp"
+        await self._app(scope, receive, send)
+
+
 def main() -> None:
     import uvicorn
-    uvicorn.run(mcp.streamable_http_app(), host="0.0.0.0", port=PORT, log_level="info")
+    app = _McpRootRewrite(mcp.streamable_http_app())
+    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
 
 
 if __name__ == "__main__":
