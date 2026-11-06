@@ -82,11 +82,21 @@ mcp = FastMCP(
 # Helper: get current user's Google Ads credentials from bearer token
 # ---------------------------------------------------------------------------
 
+# In-memory account overrides: token_str -> (customer_id, login_customer_id).
+# FastMCP holds a persistent session connection and only calls load_access_token
+# once, so DB updates alone don't affect the already-loaded token in the contextvar.
+# switch_account writes here so _creds() picks it up immediately.
+_account_overrides: dict[str, tuple[str, str | None]] = {}
+
+
 def _creds() -> tuple[str, str, str | None]:
     """Return (google_refresh_token, customer_id, login_customer_id) for the current request."""
     token = get_access_token()
     if not isinstance(token, GadsAccessToken):
         raise RuntimeError("Not authenticated or missing credentials")
+    override = _account_overrides.get(token.token)
+    if override:
+        return token.google_refresh_token, override[0], override[1]
     return token.google_refresh_token, token.customer_id, token.login_customer_id
 
 
@@ -145,6 +155,83 @@ async def list_client_accounts(manager_id: str) -> list[dict]:
         return _list(refresh_token, manager_id)
 
     return await asyncio.to_thread(_sync)
+
+
+@mcp.tool()
+async def switch_account(customer_id: str) -> str:
+    """Switch the current session to a different Google Ads account.
+
+    Call list_accounts() first to see which accounts are accessible.
+    The new account must be accessible with the authenticated user's Google credentials.
+    The switch persists for the life of the current MCP session (access + refresh tokens
+    are updated in the database).
+
+    Args:
+        customer_id: The Google Ads customer ID to switch to (dashes optional).
+
+    Returns a confirmation string with the account name and ID.
+    """
+    token = get_access_token()
+    if not isinstance(token, GadsAccessToken):
+        raise RuntimeError("Not authenticated or missing credentials")
+
+    cid = customer_id.replace("-", "").strip()
+
+    # Validate the account is accessible with the current Google refresh token
+    def _list():
+        from jarrah_gads_mcp.google_ads import list_accessible_customers
+        return list_accessible_customers(token.google_refresh_token)
+
+    accounts: list[dict] = await asyncio.to_thread(_list)
+    account_by_id = {a["id"].replace("-", ""): a for a in accounts}
+    managers = [a for a in accounts if a.get("is_manager")]
+
+    selected = account_by_id.get(cid)
+    new_login_customer_id: str | None = None
+
+    if selected is None:
+        # Not a direct-access account — search under each manager for MCC child accounts
+        for mgr in managers:
+            mgr_id = mgr["id"].replace("-", "")
+
+            def _list_clients(mid=mgr_id):
+                from jarrah_gads_mcp.google_ads import list_client_accounts as _lca
+                return _lca(token.google_refresh_token, mid)
+
+            try:
+                children = await asyncio.to_thread(_list_clients)
+            except Exception:
+                continue
+
+            child_by_id = {c["id"].replace("-", ""): c for c in children}
+            if cid in child_by_id:
+                selected = child_by_id[cid]
+                new_login_customer_id = mgr_id
+                break
+
+    if selected is None:
+        accessible = ", ".join(
+            f"{a.get('name') or '(unnamed)'} ({a['id']})" for a in accounts
+        )
+        raise ValueError(
+            f"Account {customer_id} not found under your credentials or any manager account. "
+            f"Direct accounts: {accessible}"
+        )
+
+    # For direct non-manager accounts, use the single MCC manager as login_customer_id
+    if new_login_customer_id is None and not selected.get("is_manager") and len(managers) == 1:
+        new_login_customer_id = managers[0]["id"].replace("-", "")
+
+    # Update in-memory override so _creds() picks it up immediately within this session
+    _account_overrides[token.token] = (cid, new_login_customer_id)
+
+    # Also persist to DB so the switch survives access-token refresh
+    await asyncio.to_thread(
+        _db.update_token_account, token.token, cid, new_login_customer_id
+    )
+
+    name = selected.get("name") or "(unnamed)"
+    return f"Switched to account: {name} ({cid}). All subsequent tool calls will use this account."
 
 
 @mcp.tool()
