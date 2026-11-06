@@ -108,6 +108,7 @@ middleware that rewrites `scope["path"]` from `/` to `/mcp` before the request r
 | `run_gaql` | Execute arbitrary GAQL against the authenticated account |
 | `list_accounts` | List all accounts accessible with the authenticated user's Google token |
 | `list_client_accounts` | List leaf accounts under an MCC manager |
+| `switch_account` | Switch the session to a different account (direct or MCC child) |
 | `get_campaign_metrics` | Spend/impressions/clicks/IS by date, device, channel |
 | `get_conversion_actions` | Enabled conversions with 90-day volume |
 | `get_quality_scores` | Keyword QS (1–10) with ad relevance, landing page, expected CTR |
@@ -149,8 +150,12 @@ To set up from scratch:
 
 To release a new version:
 1. Bump `version` in `pyproject.toml`
-2. `python3 -m build`
-3. `twine upload dist/* -u __token__ -p <pypi_token>`
+2. `/Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13 -m build`
+3. `PYPI_TOKEN=$(grep pypi_token .env | awk '{print $2}') && twine upload dist/* -u __token__ -p "$PYPI_TOKEN"`
+
+The PyPI token is stored as `pypi_token` in `.env`. If upload returns 403, the token has expired — generate a new one at pypi.org/manage/account/token/ scoped to `jarrah-gads-mcp`.
+
+Note: Fly.io deploys install from local source via Docker (`pip install .`), so a PyPI release is not required to deploy.
 
 ## GAQL notes
 
@@ -169,3 +174,7 @@ To release a new version:
   during tool calls. Run at 512 MB minimum.
 - Health check timeout is 5s; long-running Google Ads API calls can cause a single check to fail.
   This is harmless unless the machine is genuinely OOM-crashing.
+- FastMCP holds a persistent session connection and calls `load_access_token` only once per session,
+  not per tool call. Any code that needs to change credentials mid-session (e.g. `switch_account`)
+  must write to the `_account_overrides` dict in `server.py` — DB updates alone are invisible to the
+  running session.
