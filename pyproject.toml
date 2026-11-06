@@ -25,3 +25,14 @@ jarrah-gads-mcp = "jarrah_gads_mcp.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["jarrah_gads_mcp"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    ".env",
+    ".env.*",
+    "*.db",
+    "dist/",
+    "fly.toml",
+    "Dockerfile",
+    "AGENTS.md",
+]
